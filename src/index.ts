@@ -1,7 +1,9 @@
-import { SSS } from "sharez";
+import { SSS, ShareFormatter } from "sharez";
 import * as commander from "commander";
 import { Command, Option } from "commander";
 import "process";
+import * as fs from "fs";
+import { promisify } from "util";
 
 function myParseInt(value: string, dummyPrevious: any) {
   // parseInt takes a string and a radix
@@ -11,6 +13,7 @@ function myParseInt(value: string, dummyPrevious: any) {
   }
   return parsedValue;
 }
+
 const split = new Command();
 split
   .name("split")
@@ -24,16 +27,43 @@ split
       .makeOptionMandatory()
   )
   .addOption(
-    new Option("-e,--extra", "Number of extra shares to construct secret")
+    new Option(
+      "-e,--extra <extraCount>",
+      "Number of extra shares to construct secret"
+    )
       .argParser(myParseInt)
       .default(0)
   )
-  .addOption(new Option("-i, --infile", "File containing secret").default("-"))
-  .action(function (this: Command) {
-    console.log(this.opts());
+  .addArgument(
+    new commander.Argument("file", "File containing secret")
+      .argOptional()
+      .default("-", "Read from stdin")
+  )
+  .action(async function (this: Command, file: string) {
+    let input_data;
+    const readPromise = promisify(fs.readFile);
+    if (file === "-") {
+      // Have to do it this way, `readFileSync` opens stdin as non-blocking,
+      // this leads to it throwing an exception because it is waiting for input
+      // to the pipe
+      input_data = await readPromise(process.stdin.fd);
+    } else {
+      input_data = await readPromise(file);
+    }
+    const shareGen = SSS.from_secret(input_data, this.opts()["required"]);
+    const shareCount = this.opts()["required"] + this.opts()["extra"];
+    const shares = [...new Array(shareCount)].map(
+      (_, index) =>
+        new ShareFormatter(shareGen.get_share(index + 1), {
+          share_id: index + 1,
+          share_requirement: this.opts()["required"],
+        })
+    );
+    const shareStringsPromises = shares.map((v) => v.toString());
+    const shareStrings = await Promise.all(shareStringsPromises);
+    console.log(shareStrings);
   });
 
 const program = new Command();
-program.option("--bla");
 program.addCommand(split, { isDefault: true });
 program.parse();
