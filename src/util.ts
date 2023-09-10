@@ -8,13 +8,18 @@ export function myParseInt(value: string, dummyPrevious: any) {
   return parsedValue;
 }
 
+export function partition<T, S extends T>(
+  arr: T[],
+  predicate: (element: T) => element is S
+): { trueElements: S[]; falseElements: Exclude<T, S>[] };
+
 export function partition<T>(
   arr: T[],
-  fn: (element: T) => boolean
+  predicate: (element: T) => boolean
 ): { trueElements: T[]; falseElements: T[] } {
   const result = arr.reduce(
     (acc, val) => {
-      acc[fn(val) ? "trueElements" : "falseElements"].push(val);
+      acc[predicate(val) ? "trueElements" : "falseElements"].push(val);
       return acc;
     },
     { trueElements: [] as T[], falseElements: [] as T[] }
