@@ -94,7 +94,7 @@ merge
               error: JSON.stringify(e),
             }))
           );
-        return await Promise.all(lines);
+        return Promise.all(lines);
       });
 
     const { shares, errors } = (await Promise.all(linePromise)).reduce(
