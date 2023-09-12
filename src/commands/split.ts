@@ -2,7 +2,7 @@ import { Command, Option, Argument } from "commander";
 import * as fs from "fs";
 import { promisify } from "util";
 import { myParseInt } from "../util";
-import { SSS } from "sharez";
+import { SSS, ShareEncoder } from "sharez";
 
 export const split = new Command();
 split
@@ -45,7 +45,9 @@ split
     const shares = [...new Array(shareCount)].map((_, index) =>
       shareGen.share(index + 1)
     );
-    const shareStringsPromises = shares.map((v) => v.toString());
+    const shareStringsPromises = shares.map((v) =>
+      new ShareEncoder().encode(v)
+    );
     const shareStrings = await Promise.all(shareStringsPromises);
     process.stdout.write(shareStrings.join("\n") + "\n");
   });

@@ -2,7 +2,7 @@ import { Command, Option, Argument } from "commander";
 import * as fs from "fs";
 import { promisify } from "util";
 import { myParseInt, partition } from "../util";
-import { SSS, Share } from "sharez";
+import { SSS, Share, ShareDecoder } from "sharez";
 
 async function loadShares(text: string): Promise<{
   shares: Share[];
@@ -13,7 +13,7 @@ async function loadShares(text: string): Promise<{
     .map((x) => x.trim())
     .filter((x) => x.length > 0);
   const sharesPromise = lines.map((line) =>
-    Share.fromString(line).catch((error: any) => ({
+    new ShareDecoder().decode(line).catch((error: any) => ({
       original: line,
       error: JSON.stringify(error),
     }))
@@ -89,7 +89,7 @@ merge
           .map((x) => x.trim())
           .filter((x) => x.length > 0)
           .map((v) =>
-            Share.fromString(v).catch((e) => ({
+            new ShareDecoder().decode(v).catch((e) => ({
               original: v,
               error: JSON.stringify(e),
             }))
