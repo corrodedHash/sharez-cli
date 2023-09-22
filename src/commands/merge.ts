@@ -2,29 +2,8 @@ import { Command, Option, Argument } from "commander";
 import * as fs from "fs";
 import { promisify } from "util";
 import { myParseInt, partition } from "../util";
-import { SSS, Share, ShareDecoder } from "sharez";
+import { SSS, type Share, ShareDecoder, type DecodedShare } from "sharez";
 
-async function loadShares(text: string): Promise<{
-  shares: Share[];
-  errors: { original: string; error: string }[];
-}> {
-  const lines = text
-    .split("\n")
-    .map((x) => x.trim())
-    .filter((x) => x.length > 0);
-  const sharesPromise = lines.map((line) =>
-    new ShareDecoder().decode(line).catch((error: any) => ({
-      original: line,
-      error: JSON.stringify(error),
-    }))
-  );
-  const lineResults = await Promise.all(sharesPromise);
-  const shares = lineResults.filter((v): v is Share => v instanceof Share);
-  const errors = lineResults.filter(
-    (v): v is Exclude<typeof v, Share> => !(v instanceof Share)
-  );
-  return { shares, errors };
-}
 function checkRequiredCounts(
   shares: Share[],
   required: number | undefined
@@ -58,6 +37,59 @@ function checkRequiredCounts(
   }
 }
 
+type DecodeError = { original: string; error: string };
+
+async function partitionLines(
+  linePromise: Promise<(DecodedShare | DecodeError)[]>[]
+): Promise<{
+  shares: Share[];
+  errors: DecodeError[];
+}> {
+  return (await Promise.all(linePromise)).reduce(
+    (acc, v) => {
+      const { trueElements: shares, falseElements: errors } = partition(
+        v,
+        (e): e is { share: Share } => "share" in e
+      );
+      acc.shares = [...acc.shares, ...shares.map((v) => v.share)];
+      acc.errors = [...acc.errors, ...errors];
+      return acc;
+    },
+    {
+      shares: [] as Share[],
+      errors: [] as DecodeError[],
+    }
+  );
+}
+const readPromise = promisify(fs.readFile);
+
+function parseShareLines(
+  filepaths: string[]
+): Promise<(DecodedShare | DecodeError)[]>[] {
+  return filepaths
+    .map((v) => (v === "-" ? process.stdin.fd : v))
+    .map(async (f) => {
+      // Have to do it this way, `readFileSync` opens stdin as non-blocking,
+      // this leads to it throwing an exception because it is waiting for input
+      // to the pipe
+      let text = await readPromise(f, { encoding: "ascii" });
+      let lines = text
+        .split("\n")
+        .map((x) => x.trim())
+        .filter((x) => x.length > 0)
+        .map((v) =>
+          new ShareDecoder().decode(v).catch(
+            (e) =>
+              ({
+                original: v,
+                error: JSON.stringify(e),
+              } as DecodeError)
+          )
+        );
+      return Promise.all(lines);
+    });
+}
+
 export const merge = new Command();
 merge
   .name("merge")
@@ -76,45 +108,14 @@ merge
       .default(["-"], "Read from stdin")
   )
   .action(async function (this: Command, file: string[]) {
-    // Have to do it this way, `readFileSync` opens stdin as non-blocking,
-    // this leads to it throwing an exception because it is waiting for input
-    // to the pipe
-    const readPromise = promisify(fs.readFile);
-    const linePromise = file
-      .map((v) => (v === "-" ? process.stdin.fd : v))
-      .map(async (f) => {
-        let text = await readPromise(f, { encoding: "ascii" });
-        let lines = text
-          .split("\n")
-          .map((x) => x.trim())
-          .filter((x) => x.length > 0)
-          .map((v) =>
-            new ShareDecoder().decode(v).catch((e) => ({
-              original: v,
-              error: JSON.stringify(e),
-            }))
-          );
-        return Promise.all(lines);
-      });
+    const linePromise = parseShareLines(file);
 
-    const { shares, errors } = (await Promise.all(linePromise)).reduce(
-      (acc, v) => {
-        const { trueElements: shares, falseElements: errors } = partition(
-          v,
-          (e): e is Share => e instanceof Share
-        );
-        acc.shares = [...acc.shares, ...shares];
-        acc.errors = [...acc.errors, ...errors];
-        return acc;
-      },
-      {
-        shares: [] as Share[],
-        errors: [] as { original: string; error: string }[],
-      }
-    );
+    const { shares, errors } = await partitionLines(linePromise);
+
     errors.forEach(({ original, error }) => {
       process.stderr.write(`Error parsing "${original}": ${error}`);
     });
+
     shares.sort((a, b) => (a.xValue as number) - (b.xValue as number));
 
     const requiredCount = checkRequiredCounts(shares, this.opts()["required"]);
